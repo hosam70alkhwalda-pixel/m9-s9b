@@ -1,64 +1,96 @@
-# Module 9 Week B — Stretch (Honors Track): KG Critic / Verifier Agent
+# Module 9 Week B — Stretch Tue: KG Critic on Neo4j
 
-> **Honors Track.** This stretch is for learners who have completed the required Week B work (Reading, Drill, Lab, Integration) and are On Track or Advanced. Stretch is not required for program completion but is required for Honors distinction. See the Honors track policy for eligibility.
+**Honors Track.** Complete the core Applied Lab 9B (`m9-l9b`) first — the
+critic's verification cascade builds directly on the lab's Identity
+Discipline and SUBCLASS_OF entailment patterns. Honors Track work is
+required for Honors distinction but not for program completion. See the
+Stretch Tue page for the full eligibility note.
 
-For the full task description, see the assignment page: **Module 9 Week B — Stretch: KG Critic / Verifier Agent**.
+## What you build
 
-## What you are building
+A **KG Critic** — a verifier that takes a `(subject, predicate, object)`
+claim and decides whether the recipes graph **supports**, **entails**,
+**contradicts**, or has nothing to say about it (`unsupported` —
+abstain).
 
-A **KG critic** — an agent that takes a claim `(subject, predicate, object)` and decides whether the recipes KG **supports**, **entails**, **contradicts**, or fails to address (**unsupported**) the claim. The critic operationalizes the open-world assumption: it abstains explicitly when the KG is silent, rather than guessing.
+A KG critic is a first-class verification primitive in any production
+retrieval-augmented system: when an LLM emits a structured claim, the
+critic adjudicates it against the graph instead of trusting the LLM's
+generated text. This stretch operationalizes one of the load-bearing
+answers to "what is a KG *for?*" — verification under the open-world
+assumption, with explicit abstention.
 
-You implement the cascade in `critic/verify.py`. The starter ships:
+The cascade is intentionally short — four stages, returning the first
+verdict that fires:
 
-- `critic/types.py` — `Verdict` dataclass (fully implemented; do not modify).
-- `critic/verify.py` — `verify_claim(claim, fuseki_endpoint)` — **your work**.
-- `extractor/triples.py` — a small regex-based claim extractor (fully implemented; you may improve it, but you do not have to).
-- `data/recipes_kg.ttl` — the same KG as Lab 9B.
-- `data/eval_claims.jsonl` — 40 labeled claims (20 supported, 10 entailed-only, 10 contradicted). The autograder runs against this set.
-- `router_warmup/` — **optional** stub for composing the critic with the M8 query-router stretch. Not autograder-gated; rubric points only.
+1. **Direct EXISTS** → `supported` (confidence 1.0)
+2. **Hierarchical entailment via `[:SUBCLASS_OF*0..]`** → `entailed` (confidence 0.7)
+3. **Domain/range violation** → `contradicted` (confidence 0.8)
+4. **Otherwise** → `unsupported` (confidence 0.5)
+
+You implement Stages 1–4 inside `critic/verify.py`. The schema
+constraints, the Verdict dataclass, the claim extractor, and the
+fixture loader are all course-provided.
 
 ## Setup
 
 ```bash
-# Start Fuseki
+# 1. Start Neo4j locally.
 docker compose up -d
+docker compose logs -f neo4j | head
+# Wait for "Started." then Ctrl-C.
 
-# Install dependencies (cached from the lab — should be fast)
+# 2. Python deps (the M9 venv from the lab is fine).
 pip install -r requirements.txt
 
-# Load the KG
-python load_dataset.py
+# 3. Load the fixture and assert acceptance.
+python load_fixture.py
 
-# Run the autograder
+# 4. Run the autograder.
 pytest tests/ -v
 ```
 
-## The verdict cascade
+The unmodified starter is expected to fail — the cascade isn't wired
+up yet. See `critic/verify.py` for the four TODO blocks.
 
-`verify_claim` should resolve a claim through these stages, in order:
+## File map
 
-1. **`ASK`** the literal triple. If the KG asserts it directly → `supported`.
-2. **Entailment** — query whether the claim is entailed by an `rdfs:subClassOf*` or `skos:broader*` chain. If the chain holds → `entailed`.
-3. **Domain/range check** — if the predicate has `rdfs:domain D` and the subject's `rdf:type` is incompatible with `D` (no subclass path from the subject's type to `D`), or the same situation for `rdfs:range` and the object → `contradicted`.
-4. Otherwise → `unsupported`.
+```
+starter/
+├── critic/
+│   ├── verify.py           # YOU IMPLEMENT — 4-stage cascade (Option B TODOs)
+│   ├── verdict.py          # course-provided — Verdict dataclass (frozen)
+│   ├── extractor.py        # course-provided — parses (s,p,o) from text
+│   ├── router_warmup.py    # OPTIONAL — M8 router integration writeup
+│   └── __init__.py
+├── data/
+│   ├── recipes_kg_subset.cypher  # frozen ~40-node fixture
+│   ├── eval_set.py               # 40 labeled claims (20 sup / 10 ent / 10 con)
+│   └── README.md                 # schema reference for the cascade
+├── load_fixture.py         # CI: wipe + load + assert acceptance
+├── learner_notes.md        # YOU WRITE — design decisions and observations
+├── docker-compose.yml      # local Neo4j (mirrors CI service container)
+├── requirements.txt
+├── FORK-SUBMIT.md          # how to submit (fork-and-submit flow)
+└── LICENSE
+tests/
+├── test_critic.py          # cascade gates (precision/recall thresholds)
+├── test_verdict_shape.py
+└── test_extractor_unchanged.py
+.github/workflows/m9-s9b-autograder.yml
+```
 
-The order matters. A claim that is literally present is `supported`, not `entailed`. A claim where the entailment chain holds AND the domain/range is satisfied is `entailed`, not `contradicted`.
+## Deliverables
 
-## Autograder gates
+1. A working `critic/verify.py` that passes the autograder gates on the
+   eval-set classes.
+2. A short writeup in `learner_notes.md` covering your design choices,
+   per-class precision/recall observations, and your view of the
+   abstention boundary.
+3. (Optional) A wired `critic/router_warmup.py` + a note in
+   `learner_notes.md` if you completed the M8 stretch query router.
 
-The autograder runs `verify_claim` over `data/eval_claims.jsonl` and checks:
-
-| Class | Metric | Threshold |
-|---|---|---|
-| `supported` | precision and recall | ≥ 0.90 |
-| `entailed-only` | recall | ≥ 0.60 |
-| `contradicted` | precision | ≥ 0.75 |
-
-If you only implement step 1 (`ASK`), `entailed-only` recall will be 0. If you label everything-not-supported as `contradicted`, your `contradicted` precision will tank.
-
-## Optional warm-up — M8 router integration
-
-`router_warmup/` shows where `verify_claim` plugs into the M8 query-router stretch as a **KG branch**. If you completed the M8 stretch, wire your router to call the critic; if not, leave the file untouched (the autograder does not gate on it).
+Submission: see `FORK-SUBMIT.md`. Branch name: `stretch-9b-tue-kg-critic`.
 
 ---
 

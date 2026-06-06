@@ -1,6 +1,5 @@
-"""KG critic — verify (subject, predicate, object) claims against the recipes KG."""
+"""KG critic — verification cascade on a Neo4j recipes graph."""
+from .verdict import Verdict
+from .verify import verify_claim, SCHEMA_CONSTRAINTS
 
-from critic.types import Verdict
-from critic.verify import verify_claim
-
-__all__ = ["Verdict", "verify_claim"]
+__all__ = ["Verdict", "verify_claim", "SCHEMA_CONSTRAINTS"]
